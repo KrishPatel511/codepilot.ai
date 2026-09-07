@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import db from "../db";
+import prisma from "../lib/prisma";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
 
@@ -20,35 +20,30 @@ declare global {
   }
 }
 
-function loadUser(userId: number): AuthUser | undefined {
-  const row = db
-    .prepare("SELECT id, github_id, username, avatar_url, access_token FROM users WHERE id = ?")
-    .get(userId) as
-    | { id: number; github_id: number; username: string; avatar_url: string | null; access_token: string }
-    | undefined;
-
-  if (!row) return undefined;
+async function loadUser(userId: number): Promise<AuthUser | undefined> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return undefined;
 
   return {
-    id: row.id,
-    githubId: row.github_id,
-    username: row.username,
-    avatarUrl: row.avatar_url,
-    accessToken: row.access_token,
+    id: user.id,
+    githubId: user.githubId,
+    username: user.username,
+    avatarUrl: user.avatarUrl,
+    accessToken: user.accessToken,
   };
 }
 
 // ---- Attaches req.user if a valid token is present, but never blocks the request ----
-export function attachUser(req: Request, res: Response, next: NextFunction) {
+export async function attachUser(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
 
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as { userId: number };
-      req.user = loadUser(payload.userId);
+      req.user = await loadUser(payload.userId);
     } catch {
-      // invalid/expired token — leave req.user unset
+      // invalid/expired token, or lookup failed — leave req.user unset
     }
   }
 

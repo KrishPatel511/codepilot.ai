@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ai-github-agent-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: SERVER_URL
+        sync: false
+      - key: DAILY_REQUEST_LIMIT
+        value: "1500"

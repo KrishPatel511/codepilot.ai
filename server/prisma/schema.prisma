@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  githubId    Int      @unique @map("github_id")
+  username    String
+  avatarUrl   String?  @map("avatar_url")
+  accessToken String   @map("access_token")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  chats     Chat[]
+  usageLogs UsageLog[]
+
+  @@map("users")
+}
+
+model Chat {
+  id          Int      @id @default(autoincrement())
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String   @default("New chat")
+  pinned      Boolean  @default(false)
+  lastContext String?  @map("last_context")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  messages Message[]
+
+  @@index([userId])
+  @@map("chats")
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  chatId    Int      @map("chat_id")
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      String
+  text      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([chatId])
+  @@map("messages")
+}
+
+model UsageLog {
+  id               Int      @id @default(autoincrement())
+  userId           Int?     @map("user_id")
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model            String
+  promptTokens     Int      @default(0) @map("prompt_tokens")
+  completionTokens Int      @default(0) @map("completion_tokens")
+  totalTokens      Int      @default(0) @map("total_tokens")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("usage_logs")
+}
