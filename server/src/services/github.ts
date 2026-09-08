@@ -1,5 +1,11 @@
 import axios from "axios";
 
+// A single enormous source file or repository tree can turn one chat request
+// into several minutes of model input processing. Keep the agent's tool output
+// useful, while making the limit explicit to the user/model.
+const MAX_FILE_CONTENT_CHARS = 30_000;
+const MAX_TREE_ENTRIES = 750;
+
 function githubApi(token: string) {
   return axios.create({
     baseURL: "https://api.github.com",
@@ -52,7 +58,9 @@ export async function listRepoFiles(token: string, owner: string, repo: string, 
 export async function readFile(token: string, owner: string, repo: string, path: string) {
   const response = await githubApi(token).get(`/repos/${owner}/${repo}/contents/${path}`);
   const content = Buffer.from(response.data.content, "base64").toString("utf-8");
-  return content;
+  if (content.length <= MAX_FILE_CONTENT_CHARS) return content;
+
+  return `${content.slice(0, MAX_FILE_CONTENT_CHARS)}\n\n[File truncated after ${MAX_FILE_CONTENT_CHARS.toLocaleString()} characters for a fast response. Ask for a specific section or line range to continue.]`;
 }
 
 interface TreeEntry {
@@ -126,14 +134,23 @@ export async function getFullRepoTree(token: string, owner: string, repo: string
 
   const response = await api.get(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
 
-  const entries: TreeEntry[] = response.data.tree.map((item: any) => ({
+  const allEntries: TreeEntry[] = response.data.tree.map((item: any) => ({
     path: item.path,
     type: item.type === "tree" ? "folder" : "file",
   }));
+  const entries = allEntries
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .slice(0, MAX_TREE_ENTRIES);
+  const truncated = allEntries.length > entries.length;
+  const treeText = buildTreeString(entries, repo);
 
   return {
     paths: entries,
-    treeText: buildTreeString(entries, repo),
+    treeText: truncated
+      ? `${treeText}\n\n[Tree preview: showing the first ${MAX_TREE_ENTRIES} of ${allEntries.length} entries. Ask for a specific folder to explore the rest.]`
+      : treeText,
+    truncated,
+    totalEntries: allEntries.length,
   };
 }
 

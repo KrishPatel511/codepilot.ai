@@ -22,8 +22,10 @@ if (!apiKey) {
 
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
-const PRIMARY_MODEL = "gemini-3.6-flash";
-const FALLBACK_MODEL = "gemini-3.1-flash-lite";
+// Gemini 3.8 Flash is the requested production model. Keep a lighter model as
+// a fallback so a temporary 3.8 overload does not leave the user waiting.
+const PRIMARY_MODEL = "gemini-3.8-flash";
+const FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -185,6 +187,7 @@ const tools: Tool[] = [
 // Always uses the calling user's OWN GitHub token, never a shared one.
 async function executeTool(name: string, args: any, githubToken: string): Promise<any> {
   console.log(`🔧 Executing tool: ${name}`, args);
+  const startedAt = Date.now();
 
   try {
     switch (name) {
@@ -242,6 +245,8 @@ async function executeTool(name: string, args: any, githubToken: string): Promis
       return { error: `Not found (404): ${JSON.stringify(args)}. The path is likely wrong — try a different one.` };
     }
     return { error: error.message || "Tool execution failed" };
+  } finally {
+    console.log(`[perf] GitHub tool ${name} completed in ${Date.now() - startedAt}ms`);
   }
 }
 
@@ -250,7 +255,10 @@ async function callModelWithRetry(modelName: string, model: any, contents: any[]
   const maxRetries = 2;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await model.generateContent({ contents });
+      const startedAt = Date.now();
+      const result = await model.generateContent({ contents });
+      console.log(`[perf] ${modelName} attempt ${attempt} completed in ${Date.now() - startedAt}ms`);
+      return result;
     } catch (error: any) {
       const isOverloaded = error?.message?.includes("503") || error?.message?.includes("overloaded");
       if (isOverloaded && attempt < maxRetries) {
@@ -318,7 +326,9 @@ export interface AskGeminiOptions {
  * The main agent loop. Takes the FULL conversation history so Gemini
  * remembers earlier context (e.g. "which repo?" -> "expense-tracker-android").
  */
-const MAX_ROUNDS = 10;
+// Three tool rounds plus one forced final-answer round are enough for normal
+// repository exploration (tree -> file -> answer) and prevent runaway waits.
+const MAX_ROUNDS = 4;
 
 export async function askGemini(
   history: ChatMessage[],
@@ -355,6 +365,7 @@ export async function askGemini(
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const isLastRound = round === MAX_ROUNDS - 1;
+        console.log(`[perf] ${modelName} agent round ${round + 1}/${MAX_ROUNDS}`);
 
         if (isLastRound) {
           contents.push({
