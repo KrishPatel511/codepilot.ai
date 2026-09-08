@@ -22,10 +22,10 @@ if (!apiKey) {
 
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
-// Gemini 3.8 Flash is the requested production model. Keep a lighter model as
-// a fallback so a temporary 3.8 overload does not leave the user waiting.
-const PRIMARY_MODEL = "gemini-3.8-flash";
-const FALLBACK_MODEL = "gemini-3.5-flash-lite";
+// Normal chat favors the lowest-latency model. Gemini 3.8 Flash is reserved
+// for the UI's Think mode, where its deeper multi-step reasoning is valuable.
+const FAST_MODEL = "gemini-3.5-flash-lite";
+const DEEP_MODEL = "gemini-3.8-flash";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -349,7 +349,7 @@ export async function askGemini(
   githubToken: string,
   options: AskGeminiOptions = {}
 ): Promise<GeminiResult> {
-  const modelsToTry = [PRIMARY_MODEL, FALLBACK_MODEL];
+  const modelsToTry = options.thinkMode ? [DEEP_MODEL, FAST_MODEL] : [FAST_MODEL, DEEP_MODEL];
   let lastError: any;
 
   const systemInstruction =
@@ -357,12 +357,15 @@ export async function askGemini(
 
   for (const modelName of modelsToTry) {
     try {
-      const generationConfig = {
-        // 3.8 Flash defaults to medium thinking. Low is deliberately used for
-        // normal chat; the UI's Think mode keeps medium reasoning available.
-        thinkingConfig: { thinkingLevel: options.thinkMode ? "medium" : "low" },
-        maxOutputTokens: 4096,
-      } as any;
+      const generationConfig =
+        modelName === DEEP_MODEL
+          ? {
+              // 3.8 Flash defaults to medium thinking. Keep low thinking for
+              // fallback/ordinary work and medium only for explicit Think mode.
+              thinkingConfig: { thinkingLevel: options.thinkMode ? "medium" : "low" },
+              maxOutputTokens: 4096,
+            }
+          : { maxOutputTokens: 2048 };
 
       const model = genAI.getGenerativeModel({
         model: modelName,
