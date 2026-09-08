@@ -298,6 +298,18 @@ export type LastToolContext =
   | { type: "repo_tree"; owner: string; repo: string; treeText: string };
 
 const MAX_CONTEXT_CHARS = 6000;
+const MAX_HISTORY_MESSAGES = 8;
+const MAX_HISTORY_MESSAGE_CHARS = 6000;
+
+function compactHistory(history: ChatMessage[]): ChatMessage[] {
+  return history.slice(-MAX_HISTORY_MESSAGES).map((message) => ({
+    ...message,
+    text:
+      message.text.length > MAX_HISTORY_MESSAGE_CHARS
+        ? `${message.text.slice(0, MAX_HISTORY_MESSAGE_CHARS)}\n\n[Earlier message truncated for a fast response.]`
+        : message.text,
+  }));
+}
 
 function buildContextBlock(ctx: LastToolContext | null | undefined): string {
   if (!ctx) return "";
@@ -306,7 +318,9 @@ function buildContextBlock(ctx: LastToolContext | null | undefined): string {
     const content = ctx.content.slice(0, MAX_CONTEXT_CHARS);
     return `\n\nCONTEXT CARRIED OVER FROM EARLIER IN THIS CONVERSATION — you already read this file. If the user refers to "this file" or asks a follow-up, use the content below directly instead of calling read_file again (only re-fetch if they name a different file or ask for the latest version):\nFile: ${ctx.owner}/${ctx.repo}/${ctx.path}\n\`\`\`\n${content}${truncated ? "\n...(truncated)" : ""}\n\`\`\``;
   }
-  return `\n\nCONTEXT CARRIED OVER FROM EARLIER IN THIS CONVERSATION — you already fetched this repo's full tree. Reuse it instead of calling get_full_repo_tree again unless the user names a different repo:\nRepo: ${ctx.owner}/${ctx.repo}\n${ctx.treeText}`;
+  const truncated = ctx.treeText.length > MAX_CONTEXT_CHARS;
+  const treeText = ctx.treeText.slice(0, MAX_CONTEXT_CHARS);
+  return `\n\nCONTEXT CARRIED OVER FROM EARLIER IN THIS CONVERSATION — you already fetched this repo's full tree. Reuse it instead of calling get_full_repo_tree again unless the user names a different repo:\nRepo: ${ctx.owner}/${ctx.repo}\n${treeText}${truncated ? "\n...(earlier tree context truncated for speed)" : ""}`;
 }
 
 function addUsage(usage: TokenUsage, response: any) {
@@ -343,19 +357,28 @@ export async function askGemini(
 
   for (const modelName of modelsToTry) {
     try {
+      const generationConfig = {
+        // 3.8 Flash defaults to medium thinking. Low is deliberately used for
+        // normal chat; the UI's Think mode keeps medium reasoning available.
+        thinkingConfig: { thinkingLevel: options.thinkMode ? "medium" : "low" },
+        maxOutputTokens: 4096,
+      } as any;
+
       const model = genAI.getGenerativeModel({
         model: modelName,
         tools,
         systemInstruction,
+        generationConfig,
       });
       // No `tools` here — used on the final round to force a text answer
       // instead of letting the model request yet another tool call.
       const modelNoTools = genAI.getGenerativeModel({
         model: modelName,
         systemInstruction,
+        generationConfig,
       });
 
-      let contents: any[] = history.map((m) => ({
+      let contents: any[] = compactHistory(history).map((m) => ({
         role: m.role,
         parts: [{ text: m.text }],
       }));
