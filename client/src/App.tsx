@@ -62,6 +62,19 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore if already stopped
+        }
+      }
+    };
+  }, []);
+
   // If GitHub just redirected back here with ?token=..., capture it and clean the URL.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -162,400 +175,388 @@ function App() {
   const handleSwitchChat = async (id: number) => {
     setActiveChatId(id);
     setSidebarOpen(false);
-
-    const existing = chats.find((c) => c.id === id);
-    if (existing && existing.messages.length > 0) return;
-
     try {
       const res = await apiFetch(`/chats/${id}`);
+      if (!res.ok) throw new Error("Failed to load chat");
       const data = await res.json();
-      const messages: Message[] = (data.messages || []).map((m: any) => ({
-        role: m.role,
-        text: m.text,
-        time: new Date(m.created_at.replace(" ", "T") + "Z").toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      }));
+      const messages: Message[] = (data.messages || []).map((m: any) => {
+        const dateObj = m.created_at ? new Date(m.created_at.replace(" ", "T") + "Z") : new Date();
+        const time = isNaN(dateObj.getTime())
+          ? nowTime()
+          : dateObj.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return {
+          role: m.role,
+          text: m.text,
+          time,
+        };
+      });
       setChats((prev) => prev.map((c) => (c.id === id ? { ...c, messages } : c)));
     } catch (err) {
       console.error("Failed to load chat messages", err);
     }
   };
 
-  const handleTogglePin = async (id: number, pinned: boolean) => {
-    setChatMenuOpenId(null);
-    setChatMenuPos(null);
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, pinned } : c)));
+  const handleTogglePin = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const chat = chats.find((c) => c.id === id);
+    if (!chat) return;
+    const newPinned = !chat.pinned;
+    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, pinned: newPinned } : c)));
     try {
-      await apiFetch(`/chats/${id}`, {
+      const res = await apiFetch(`/chats/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pinned }),
+        body: JSON.stringify({ pinned: newPinned }),
       });
+      if (!res.ok) throw new Error("Failed to update pin");
     } catch (err) {
       console.error("Failed to update pin state", err);
+      // Revert optimistic update on failure
+      setChats((prev) => prev.map((c) => (c.id === id ? { ...c, pinned: !newPinned } : c)));
     }
   };
 
-  const handleStartRename = (id: number, currentTitle: string) => {
-    setChatMenuOpenId(null);
-    setChatMenuPos(null);
-    setRenamingChatId(id);
-    setRenameValue(currentTitle);
-  };
-
-  const handleConfirmRename = async (id: number) => {
-    const title = renameValue.trim();
-    setRenamingChatId(null);
-    if (!title) return;
-
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
-    try {
-      await apiFetch(`/chats/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
-      });
-    } catch (err) {
-      console.error("Failed to rename chat", err);
-    }
-  };
-
-  const handleDeleteChat = async (id: number) => {
-    setChatMenuOpenId(null);
-    setChatMenuPos(null);
-    if (!window.confirm("Delete this chat? This can't be undone.")) return;
-
+  const handleDeleteChat = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const chatToDelete = chats.find((c) => c.id === id);
     setChats((prev) => prev.filter((c) => c.id !== id));
     if (activeChatId === id) {
-      setDraftChat(emptyDraft());
       setActiveChatId(null);
+      setDraftChat(emptyDraft());
     }
     try {
-      await apiFetch(`/chats/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/chats/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete chat");
     } catch (err) {
       console.error("Failed to delete chat", err);
+      if (chatToDelete) {
+        setChats((prev) => [...prev, chatToDelete]);
+      }
     }
   };
 
-  const fetchRepos = async () => {
-    setReposLoading(true);
+  const handleStartRename = (id: number, currentTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingChatId(id);
+    setRenameValue(currentTitle);
+    setChatMenuOpenId(null);
+    setChatMenuPos(null);
+  };
+
+  const handleSaveRename = async (id: number) => {
+    const trimmed = renameValue.trim();
+    setRenamingChatId(null);
+    if (!trimmed) return;
+    const oldChat = chats.find((c) => c.id === id);
+    const oldTitle = oldChat?.title;
+    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c)));
     try {
-      const res = await apiFetch("/github/repos");
-      const data = await res.json();
-      setRepos(Array.isArray(data) ? data : []);
-      setReposLoaded(true);
+      const res = await apiFetch(`/chats/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) throw new Error("Failed to rename chat");
     } catch (err) {
-      console.error("Failed to fetch repos", err);
-    } finally {
-      setReposLoading(false);
+      console.error("Failed to rename chat", err);
+      if (oldTitle !== undefined) {
+        setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title: oldTitle } : c)));
+      }
     }
   };
 
   const handleOpenSettings = () => {
-    setProfileMenuOpen(false);
     setSettingsOpen(true);
+    setProfileMenuOpen(false);
     setUsageLoading(true);
     apiFetch("/usage")
       .then((res) => res.json())
       .then((data: UsageData) => setUsageData(data))
-      .catch((err) => console.error("Failed to load usage", err))
+      .catch((err) => console.error("Failed to fetch usage data", err))
       .finally(() => setUsageLoading(false));
   };
 
-  const handleRepoClick = (repo: Repo) => {
-    setInput(`Tell me about the ${repo.name} repository and show its folder structure.`);
-    textareaRef.current?.focus();
-    setSidebarOpen(false);
-  };
-
-  const promptForRepo = () => {
-    const suggestion = repos[0]?.fullName || "";
-    return window.prompt("Which repo? (e.g. owner/repo)", suggestion)?.trim() || null;
-  };
-
-  const handleBrowseRepository = () => {
-    setPlusMenuOpen(false);
-    const repo = promptForRepo();
-    if (!repo) return;
-    setInput(`Show me the files in the root of ${repo}`);
-    textareaRef.current?.focus();
-  };
-
-  const handleExploreFolderTree = () => {
-    setPlusMenuOpen(false);
-    const repo = promptForRepo();
-    if (!repo) return;
-    setInput(`Show me the complete folder structure of ${repo}, including all nested folders`);
-    textareaRef.current?.focus();
-  };
-
-  const handleSearchCode = () => {
-    setPlusMenuOpen(false);
-    const repo = promptForRepo();
-    if (!repo) return;
-    const query = window.prompt(`Search for what, inside ${repo}?`)?.trim();
-    if (!query) return;
-    setInput(`Search for "${query}" in ${repo}`);
-    textareaRef.current?.focus();
-  };
-
-  const handleManageGithubConnection = () => {
-    setPlusMenuOpen(false);
-    window.open("https://github.com/settings/connections", "_blank", "noopener,noreferrer");
-  };
-
   const handleToggleMic = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Voice input isn't supported in this browser. Try Chrome or Edge.");
+    if (isRecording) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsRecording(false);
       return;
     }
 
-    if (isRecording) {
-      recognitionRef.current?.stop();
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser.");
       return;
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+    recognition.interimResults = true;
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInput((prev) => (prev ? prev + " " + transcript : transcript));
     };
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
+
+    recognition.onerror = () => {
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
 
     recognitionRef.current = recognition;
     recognition.start();
     setIsRecording(true);
   };
 
-  const autoGrow = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
-  };
+  const handleSend = async (repoContext?: { owner: string; name: string; path?: string }) => {
+    const textToSend = input.trim();
+    if ((!textToSend && !repoContext) || loading) return;
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-
-    const messageText = input;
-    const userMessage: Message = { role: "user", text: messageText, time: nowTime() };
-    const isNewChat = activeChatId === null;
-
-    setInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    setLoading(true);
-
-    if (isNewChat) {
-      setDraftChat((prev) => ({ ...prev, messages: [...prev.messages, userMessage] }));
-    } else {
-      setChats((prev) =>
-        prev.map((c) => (c.id === activeChatId ? { ...c, messages: [...c.messages, userMessage] } : c))
-      );
+    let userDisplayMessage = textToSend;
+    if (repoContext) {
+      const prefix = repoContext.path
+        ? `[Repo: ${repoContext.owner}/${repoContext.name} @ ${repoContext.path}] `
+        : `[Repo: ${repoContext.owner}/${repoContext.name}] `;
+      userDisplayMessage = prefix + (textToSend || "Please analyze this repository.");
     }
 
-    let chatId = activeChatId;
+    const userMsg: Message = { role: "user", text: userDisplayMessage, time: nowTime() };
+    const assistantPlaceholder: Message = { role: "assistant", text: "", time: nowTime() };
 
-    try {
-      if (isNewChat) {
+    let chatId = activeChatId;
+    let updatedChats = [...chats];
+
+    if (chatId === null) {
+      try {
+        const title = textToSend.slice(0, 30) || "Code analysis";
         const createRes = await apiFetch("/chats", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: messageText.slice(0, 40) }),
+          body: JSON.stringify({ title }),
         });
-        const newChat = await createRes.json();
-        chatId = newChat.id;
-        setChats((prev) => [
-          { id: newChat.id, title: newChat.title, pinned: false, messages: [userMessage] },
-          ...prev,
-        ]);
-        setDraftChat(emptyDraft());
-        setActiveChatId(newChat.id);
+        if (createRes.ok) {
+          const newChatData = await createRes.json();
+          chatId = newChatData.id;
+          setActiveChatId(chatId);
+          const newChatObj: ChatSession = {
+            id: chatId!,
+            title: newChatData.title || title,
+            pinned: false,
+            messages: [userMsg, assistantPlaceholder],
+          };
+          updatedChats = [newChatObj, ...chats];
+          setChats(updatedChats);
+          setDraftChat(emptyDraft());
+        }
+      } catch (err) {
+        console.error("Failed to create chat", err);
       }
+    } else {
+      updatedChats = chats.map((c) =>
+        c.id === chatId ? { ...c, messages: [...c.messages, userMsg, assistantPlaceholder] } : c
+      );
+      setChats(updatedChats);
+    }
+
+    setInput("");
+    setLoading(true);
+
+    try {
+      const chatHistory =
+        chatId !== null
+          ? updatedChats.find((c) => c.id === chatId)?.messages.slice(0, -1) || []
+          : [...draftChat.messages, userMsg];
 
       const res = await apiFetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, message: messageText, thinkMode }),
+        body: JSON.stringify({
+          messages: chatHistory.map((m) => ({ role: m.role, text: m.text })),
+          repoContext: repoContext || null,
+          thinkMode,
+        }),
       });
-      const data = await res.json();
-      const agentMessage: Message = {
-        role: "agent",
-        text: data.reply || data.error || "No response.",
-        time: nowTime(),
-      };
-      setChats((prev) =>
-        prev.map((c) => (c.id === chatId ? { ...c, messages: [...c.messages, agentMessage] } : c))
-      );
-    } catch (err) {
-      const errMessage: Message = {
-        role: "agent",
-        text: "⚠️ Could not reach the server. Is it running on port 5001?",
-        time: nowTime(),
-      };
-      if (chatId === null) {
-        setDraftChat((prev) => ({ ...prev, messages: [...prev.messages, errMessage] }));
-      } else {
+
+      if (!res.ok) throw new Error("Failed to get response");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader available");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        accumulated += chunk;
+
         setChats((prev) =>
-          prev.map((c) => (c.id === chatId ? { ...c, messages: [...c.messages, errMessage] } : c))
+          prev.map((c) => {
+            if (c.id === chatId) {
+              const msgs = [...c.messages];
+              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], text: accumulated };
+              return { ...c, messages: msgs };
+            }
+            return c;
+          })
         );
       }
+    } catch (err) {
+      console.error("Chat error", err);
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id === chatId) {
+            const msgs = [...c.messages];
+            msgs[msgs.length - 1] = {
+              ...msgs[msgs.length - 1],
+              text: "Sorry, something went wrong while generating the response.",
+            };
+            return { ...c, messages: msgs };
+          }
+          return c;
+        })
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const regenerateLastResponse = async () => {
-    if (loading || activeChatId === null) return;
+  const handleRegenerate = async () => {
+    if (activeChat.messages.length < 2 || loading) return;
+    const msgsWithoutLast = activeChat.messages.slice(0, -1);
+    const assistantPlaceholder: Message = { role: "assistant", text: "", time: nowTime() };
 
-    const current = chats.find((c) => c.id === activeChatId);
-    if (!current || current.messages.length < 2) return;
-
-    const lastAgentMessage = current.messages[current.messages.length - 1];
-    const lastUserMessage = current.messages[current.messages.length - 2];
-    if (lastAgentMessage.role !== "agent" || lastUserMessage.role !== "user") return;
-
-    setLoading(true);
     setChats((prev) =>
-      prev.map((c) => (c.id === activeChatId ? { ...c, messages: c.messages.slice(0, -1) } : c))
+      prev.map((c) =>
+        c.id === activeChatId ? { ...c, messages: [...msgsWithoutLast, assistantPlaceholder] } : c
+      )
     );
+    setLoading(true);
 
     try {
       const res = await apiFetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chatId: activeChatId,
-          message: lastUserMessage.text,
+          messages: msgsWithoutLast.map((m) => ({ role: m.role, text: m.text })),
           thinkMode,
-          regenerate: true,
         }),
       });
-      const data = await res.json();
-      const agentMessage: Message = {
-        role: "agent",
-        text: data.reply || data.error || "No response.",
-        time: nowTime(),
-      };
-      setChats((prev) =>
-        prev.map((c) => (c.id === activeChatId ? { ...c, messages: [...c.messages, agentMessage] } : c))
-      );
+
+      if (!res.ok) throw new Error("Failed to regenerate");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader available");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id === activeChatId) {
+              const msgs = [...c.messages];
+              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], text: accumulated };
+              return { ...c, messages: msgs };
+            }
+            return c;
+          })
+        );
+      }
     } catch (err) {
-      const errMessage: Message = {
-        role: "agent",
-        text: "⚠️ Could not reach the server. Is it running on port 5001?",
-        time: nowTime(),
-      };
-      setChats((prev) =>
-        prev.map((c) => (c.id === activeChatId ? { ...c, messages: [...c.messages, errMessage] } : c))
-      );
+      console.error("Regenerate error", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
   if (!authChecked) {
-    return <div className="auth-loading" />;
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0d1117] text-gray-300 font-sans">
+        <div className="flex items-center space-x-3">
+          <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+          <span>Loading Codepilot.ai...</span>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
-  const inputPanelProps = {
-    input,
-    onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setInput(e.target.value);
-      autoGrow();
-    },
-    onKeyDown: handleKeyDown,
-    textareaRef,
-    loading,
-    plusMenuOpen,
-    onTogglePlusMenu: () => setPlusMenuOpen((prev) => !prev),
-    onBrowseRepository: handleBrowseRepository,
-    onExploreFolderTree: handleExploreFolderTree,
-    onSearchCode: handleSearchCode,
-    onManageGithubConnection: handleManageGithubConnection,
-    thinkMode,
-    onToggleThinkMode: () => setThinkMode((prev) => !prev),
-    isRecording,
-    onToggleMic: handleToggleMic,
-    onSend: sendMessage,
-  };
-
   return (
-    <div className={`app ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <div className="flex h-screen bg-[#0d1117] text-gray-100 font-sans overflow-hidden">
       <Sidebar
-        collapsed={collapsed}
         sidebarOpen={sidebarOpen}
-        onSidebarToggle={handleSidebarToggle}
-        onExpandFromRail={() => setCollapsed(false)}
-        onCloseSidebarOverlay={() => setSidebarOpen(false)}
-        onNewChat={handleNewChat}
-        repos={repos}
-        reposLoaded={reposLoaded}
-        reposLoading={reposLoading}
-        onFetchRepos={fetchRepos}
-        onRepoClick={handleRepoClick}
+        setSidebarOpen={setSidebarOpen}
+        collapsed={collapsed}
+        handleSidebarToggle={handleSidebarToggle}
+        handleNewChat={handleNewChat}
         chats={chats}
         activeChatId={activeChatId}
+        handleSwitchChat={handleSwitchChat}
+        chatMenuOpenId={chatMenuOpenId}
+        setChatMenuOpenId={setChatMenuOpenId}
+        chatMenuPos={chatMenuPos}
+        setChatMenuPos={setChatMenuPos}
         renamingChatId={renamingChatId}
         renameValue={renameValue}
-        onRenameValueChange={setRenameValue}
-        onConfirmRename={handleConfirmRename}
-        onCancelRename={() => setRenamingChatId(null)}
-        onSwitchChat={handleSwitchChat}
-        onTogglePin={handleTogglePin}
-        onStartRename={handleStartRename}
-        onDeleteChat={handleDeleteChat}
-        chatMenuOpenId={chatMenuOpenId}
-        chatMenuPos={chatMenuPos}
-        onOpenChatMenu={(chatId, pos) => {
-          setChatMenuOpenId(chatId);
-          setChatMenuPos(pos);
-        }}
-        onCloseChatMenu={() => {
-          setChatMenuOpenId(null);
-          setChatMenuPos(null);
-        }}
+        setRenameValue={setRenameValue}
+        handleStartRename={handleStartRename}
+        handleSaveRename={handleSaveRename}
+        handleTogglePin={handleTogglePin}
+        handleDeleteChat={handleDeleteChat}
         currentUser={currentUser}
         profileMenuOpen={profileMenuOpen}
-        onToggleProfileMenu={() => setProfileMenuOpen((prev) => !prev)}
-        onOpenSettings={handleOpenSettings}
-        onLogout={handleLogout}
+        setProfileMenuOpen={setProfileMenuOpen}
+        handleOpenSettings={handleOpenSettings}
+        handleLogout={handleLogout}
       />
 
       <ChatWindow
-        clock={clock}
-        onOpenSidebar={() => setSidebarOpen(true)}
         activeChat={activeChat}
+        clock={clock}
         loading={loading}
+        input={input}
+        setInput={setInput}
+        handleSend={handleSend}
+        handleRegenerate={handleRegenerate}
+        handleSidebarToggle={handleSidebarToggle}
         chatScrollRef={chatScrollRef}
         lastUserMsgRef={lastUserMsgRef}
-        inputPanelProps={inputPanelProps}
-        onRegenerate={regenerateLastResponse}
+        textareaRef={textareaRef}
+        repos={repos}
+        reposLoaded={reposLoaded}
+        setReposLoaded={setReposLoaded}
+        reposLoading={reposLoading}
+        setReposLoading={setReposLoading}
+        setRepos={setRepos}
+        plusMenuOpen={plusMenuOpen}
+        setPlusMenuOpen={setPlusMenuOpen}
+        thinkMode={thinkMode}
+        setThinkMode={setThinkMode}
+        isRecording={isRecording}
+        handleToggleMic={handleToggleMic}
       />
 
       {settingsOpen && (
         <SettingsModal
-          onClose={() => setSettingsOpen(false)}
-          usageLoading={usageLoading}
+          currentUser={currentUser}
           usageData={usageData}
+          usageLoading={usageLoading}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
     </div>
