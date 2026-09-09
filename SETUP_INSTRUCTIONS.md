@@ -14,7 +14,6 @@ cp .env.example .env
 
 Edit `.env`:
 ```
-GITHUB_TOKEN=your_github_fine_grained_token
 GEMINI_API_KEY=your_gemini_api_key
 PORT=5000
 ```
