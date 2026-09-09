@@ -111,7 +111,7 @@ export function ChatWindow({
             ☰
           </button>
           <span className="status-dot"></span>
-          <span className="topbar-title">CodePilot</span>
+          <span className="topbar-title">RepoSentry</span>
         </div>
         <div className="topbar-clock">{clock}</div>
       </div>

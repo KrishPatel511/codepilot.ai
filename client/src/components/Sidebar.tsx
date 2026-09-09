@@ -122,7 +122,7 @@ export function Sidebar({
               <div className="brand-icon">
                 <img src="/logo-icon.png" alt="" className="brand-logo-img" />
               </div>
-              CodePilot
+              RepoSentry
             </div>
           )}
           <button

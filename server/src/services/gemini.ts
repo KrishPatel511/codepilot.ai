@@ -33,9 +33,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // executeTool regardless of what the model asks for, so fixing 5 bugs across 5
 // conversations still produces exactly one branch and one pull request per repo,
 // not five. Each new fix is just another commit onto the same branch/PR.
-const FIX_BRANCH_NAME = "codepilot-fixes";
+const FIX_BRANCH_NAME = "reposentry-fixes";
 
-const SYSTEM_INSTRUCTION = `You are CodePilot, an AI coding agent that helps the user with their GitHub repositories.
+const SYSTEM_INSTRUCTION = `You are RepoSentry, an AI coding agent that helps the user with their GitHub repositories.
 
 You have tools to list repos, list files, read file contents, and get a full repo tree — use them whenever you need real data instead of guessing.
 

@@ -1,4 +1,4 @@
-# 🤖 AI GitHub Coding Agent
+# 🤖 RepoSentry
 
 An AI agent that explores your GitHub repositories, reads files, and answers
 questions about your code using natural language + tool calling.

@@ -5,7 +5,7 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
     <div className="login-screen">
       <div className="login-card">
         <img src="/logo-icon.png" alt="" className="login-logo" />
-        <h1 className="login-title">CodePilot</h1>
+        <h1 className="login-title">RepoSentry</h1>
         <p className="login-subtitle">
           Your AI coding agent for GitHub — sign in to let it read and analyze your own repositories.
         </p>

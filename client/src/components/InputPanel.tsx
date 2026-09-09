@@ -102,7 +102,7 @@ export function InputPanel({
 
           <textarea
             ref={textareaRef}
-            placeholder="Message CodePilot..."
+            placeholder="Message RepoSentry..."
             rows={1}
             value={input}
             onChange={onInputChange}
