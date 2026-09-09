@@ -124,7 +124,13 @@ function buildTreeString(entries: TreeEntry[], rootLabel: string): string {
  * Returns both a flat path list (for the model to pick exact paths from, e.g. for read_file)
  * and a pre-formatted "treeText" string the model should relay as-is in a code block.
  */
-export async function getFullRepoTree(token: string, owner: string, repo: string, branch?: string) {
+export async function getFullRepoTree(
+  token: string,
+  owner: string,
+  repo: string,
+  branch?: string,
+  maxEntries: number = MAX_TREE_ENTRIES
+) {
   const api = githubApi(token);
 
   if (!branch) {
@@ -140,16 +146,20 @@ export async function getFullRepoTree(token: string, owner: string, repo: string
   }));
   const entries = allEntries
     .sort((a, b) => a.path.localeCompare(b.path))
-    .slice(0, MAX_TREE_ENTRIES);
+    .slice(0, maxEntries);
   const truncated = allEntries.length > entries.length;
+  const githubTruncated = Boolean(response.data.truncated);
   const treeText = buildTreeString(entries, repo);
 
   return {
     paths: entries,
-    treeText: truncated
-      ? `${treeText}\n\n[Tree preview: showing the first ${MAX_TREE_ENTRIES} of ${allEntries.length} entries. Ask for a specific folder to explore the rest.]`
-      : treeText,
+    treeText:
+      (truncated
+        ? `${treeText}\n\n[Tree preview: showing the first ${entries.length} of ${allEntries.length} entries. Ask for a specific folder to explore the rest.]`
+        : treeText) +
+      (githubTruncated ? "\n\n[GitHub truncated its recursive tree response because the repository is extremely large.]" : ""),
     truncated,
+    githubTruncated,
     totalEntries: allEntries.length,
   };
 }
