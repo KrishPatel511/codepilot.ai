@@ -412,6 +412,55 @@ function App() {
     }
   };
 
+  const regenerateLastResponse = async () => {
+    if (loading || activeChatId === null) return;
+
+    const current = chats.find((c) => c.id === activeChatId);
+    if (!current || current.messages.length < 2) return;
+
+    const lastAgentMessage = current.messages[current.messages.length - 1];
+    const lastUserMessage = current.messages[current.messages.length - 2];
+    if (lastAgentMessage.role !== "agent" || lastUserMessage.role !== "user") return;
+
+    setLoading(true);
+    setChats((prev) =>
+      prev.map((c) => (c.id === activeChatId ? { ...c, messages: c.messages.slice(0, -1) } : c))
+    );
+
+    try {
+      const res = await apiFetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: activeChatId,
+          message: lastUserMessage.text,
+          thinkMode,
+          regenerate: true,
+        }),
+      });
+      const data = await res.json();
+      const agentMessage: Message = {
+        role: "agent",
+        text: data.reply || data.error || "No response.",
+        time: nowTime(),
+      };
+      setChats((prev) =>
+        prev.map((c) => (c.id === activeChatId ? { ...c, messages: [...c.messages, agentMessage] } : c))
+      );
+    } catch (err) {
+      const errMessage: Message = {
+        role: "agent",
+        text: "⚠️ Could not reach the server. Is it running on port 5001?",
+        time: nowTime(),
+      };
+      setChats((prev) =>
+        prev.map((c) => (c.id === activeChatId ? { ...c, messages: [...c.messages, errMessage] } : c))
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -499,6 +548,7 @@ function App() {
         chatScrollRef={chatScrollRef}
         lastUserMsgRef={lastUserMsgRef}
         inputPanelProps={inputPanelProps}
+        onRegenerate={regenerateLastResponse}
       />
 
       {settingsOpen && (

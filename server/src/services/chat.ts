@@ -59,16 +59,26 @@ export async function sendMessage(
   accessToken: string,
   chatId: number,
   message: string,
-  thinkMode: boolean
+  thinkMode: boolean,
+  regenerate: boolean = false
 ): Promise<SendMessageResult | null> {
   const chat = await prisma.chat.findFirst({ where: { id: chatId, userId } });
   if (!chat) return null;
 
-  await prisma.message.create({ data: { chatId, role: "user", text: message } });
+  if (regenerate) {
+    // Regenerating replaces the last answer rather than appending a duplicate
+    // question, so drop the reply we're about to redo instead of re-asking.
+    const lastMessage = await prisma.message.findFirst({ where: { chatId }, orderBy: { id: "desc" } });
+    if (lastMessage?.role === "agent") {
+      await prisma.message.delete({ where: { id: lastMessage.id } });
+    }
+  } else {
+    await prisma.message.create({ data: { chatId, role: "user", text: message } });
 
-  const isFirstMessage = chat.title === "New chat";
-  if (isFirstMessage) {
-    await prisma.chat.update({ where: { id: chatId }, data: { title: message.slice(0, 40) } });
+    const isFirstMessage = chat.title === "New chat";
+    if (isFirstMessage) {
+      await prisma.chat.update({ where: { id: chatId }, data: { title: message.slice(0, 40) } });
+    }
   }
 
   const rows = await prisma.message.findMany({ where: { chatId }, orderBy: { id: "asc" } });

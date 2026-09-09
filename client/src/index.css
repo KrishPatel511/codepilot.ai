@@ -580,6 +580,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 10px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -588,13 +590,29 @@ body {
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
   font-size: 14px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.topbar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-clock {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .mobile-menu-btn {
   display: none;
+  flex-shrink: 0;
   background: none;
   border: none;
   color: var(--text-primary);
@@ -813,35 +831,93 @@ body {
   flex-direction: row-reverse;
 }
 
+/* ---------- Message action icons (copy / feedback / regenerate) ---------- */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+.msg-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 17px;
+}
+.msg-action-btn svg {
+  stroke-width: 2.5px;
+}
+.msg-action-btn:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-primary);
+}
+.msg-action-btn.active {
+  color: var(--accent);
+}
+.msg-action-btn.active svg {
+  fill: currentColor;
+}
+
 .typing-row {
   margin-bottom: 26px;
-}
-.typing-dots {
   display: flex;
-  gap: 4px;
-  padding: 12px 0;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  animation: msg-fade-in 0.2s ease;
 }
-.typing-dots span {
-  width: 6px;
-  height: 6px;
+.thinking-orb {
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--text-muted);
-  animation: blink 1.2s infinite ease-in-out;
+  flex-shrink: 0;
+  background: radial-gradient(circle at 32% 32%, #21d6a8, var(--accent));
+  animation: orb-pulse 1.4s ease-in-out infinite;
 }
-.typing-dots span:nth-child(2) {
-  animation-delay: 0.2s;
+.thinking-text {
+  font-size: 13.5px;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-primary) 50%, var(--text-muted) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer 1.8s linear infinite;
 }
-.typing-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-@keyframes blink {
+@keyframes orb-pulse {
   0%,
-  80%,
   100% {
-    opacity: 0.3;
+    transform: scale(0.85);
+    box-shadow: 0 0 0 0 rgba(16, 163, 127, 0.45);
   }
-  40% {
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px 4px rgba(16, 163, 127, 0.2);
+  }
+}
+@keyframes thinking-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@keyframes msg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -1152,7 +1228,11 @@ body {
 /* ---------- Responsive ---------- */
 @media (max-width: 820px) {
   .app {
-    grid-template-columns: 0 1fr;
+    /* The sidebar becomes position:fixed below (an overlay drawer), which takes it
+       out of grid flow entirely. With only .main left as a grid item, "0 1fr" would
+       auto-place it into the first (0-width) track instead of the second — collapsing
+       the whole app to 0 width. A single 1fr column avoids that trap. */
+    grid-template-columns: 1fr;
   }
   .sidebar {
     position: fixed;
@@ -1172,6 +1252,9 @@ body {
   .mobile-menu-btn {
     display: flex;
   }
+  .topbar {
+    padding: 10px 14px;
+  }
   .chat-inner,
   .input-inner {
     padding-left: 14px;
@@ -1179,6 +1262,34 @@ body {
   }
   .msg-col {
     max-width: 88%;
+  }
+  .msg-action-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .input-area {
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  .landing-heading {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 480px) {
+  .msg-bubble {
+    font-size: 14px;
+  }
+  .chat-inner,
+  .input-inner,
+  .landing {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .msg-row.user .msg-col {
+    max-width: 92%;
+  }
+  .thinking-text {
+    font-size: 13px;
   }
 }
 
