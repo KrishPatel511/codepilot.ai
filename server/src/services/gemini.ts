@@ -45,6 +45,10 @@ When the user asks you to review code, find bugs, spot issues, or suggest improv
 3. Reference specific line numbers or code snippets in your findings.
 4. If the code looks fine, say so honestly instead of inventing problems.
 
+When the user asks you to read, open, view, or show a specific file (without asking for a review/analysis):
+- Call read_file (using get_full_repo_tree first only if you don't already know the exact path) and then paste the actual file content back in your reply, inside a fenced code block with the right language tag.
+- Don't just confirm that you read it ("File read successfully!") without showing it — the user asked to see the file, so show it.
+
 When the user asks for a repo's folder/file structure, tree, or "show me everything":
 - Call get_full_repo_tree and paste its "treeText" field EXACTLY as returned, inside a fenced code block using \`\`\`text — do not retype, reformat, summarize, or convert it into a table or prose. It is already correctly indented.
 - Use the "paths" field only to look up an exact file path when you then need to call read_file — never re-derive a path from the printed tree text.
@@ -198,7 +202,10 @@ async function executeTool(name: string, args: any, githubToken: string): Promis
       case "read_file":
         return await readFile(githubToken, args.owner, args.repo, args.path);
       case "get_full_repo_tree":
-        return await getFullRepoTree(githubToken, args.owner, args.repo);
+        // Unlimited: this tool's result is short-circuited straight back to the user
+        // (see askGemini) instead of being retyped by the model, so there's no
+        // model-output-token ceiling to protect against truncating it.
+        return await getFullRepoTree(githubToken, args.owner, args.repo, undefined, Number.POSITIVE_INFINITY);
       case "search_code":
         return await searchCode(githubToken, args.owner, args.repo, args.query);
       case "create_branch":
@@ -363,9 +370,9 @@ export async function askGemini(
               // 3.8 Flash defaults to medium thinking. Keep low thinking for
               // fallback/ordinary work and medium only for explicit Think mode.
               thinkingConfig: { thinkingLevel: options.thinkMode ? "medium" : "low" },
-              maxOutputTokens: 4096,
+              maxOutputTokens: 8192,
             }
-          : { maxOutputTokens: 2048 };
+          : { maxOutputTokens: 8192 };
 
       const model = genAI.getGenerativeModel({
         model: modelName,
@@ -410,7 +417,15 @@ export async function askGemini(
         const functionCalls = isLastRound ? undefined : response.functionCalls();
 
         if (!functionCalls || functionCalls.length === 0) {
-          return { text: response.text(), model: modelName, usage, lastToolContext };
+          const text = response.text();
+          return {
+            text: text.trim()
+              ? text
+              : "I gathered the information but couldn't put together a final answer — could you try rephrasing that?",
+            model: modelName,
+            usage,
+            lastToolContext,
+          };
         }
 
         contents.push({ role: "model", parts: response.candidates[0].content.parts });
