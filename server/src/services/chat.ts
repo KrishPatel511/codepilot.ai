@@ -8,8 +8,12 @@ export interface SendMessageResult {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
+// Matches either "full/complete/... + folder/tree/structure" in either order,
+// OR a bare "tree"/"folder structure"/"file structure"/"directory structure"
+// mention on its own — "tree" is specific enough that it doesn't need a
+// full/complete qualifier to unambiguously mean "show me the repo tree".
 const FULL_TREE_REQUEST =
-  /\b(full|complete|entire|all)\b.*\b(folder|folders|file|files|tree|structure)\b|\b(folder|folders|file|files|tree|structure)\b.*\b(full|complete|entire|all)\b/i;
+  /\b(full|complete|entire|all|whole)\b.*\b(folder|folders|file|files|tree|structure|directory|directories)\b|\b(folder|folders|file|files|tree|structure|directory|directories)\b.*\b(full|complete|entire|all|whole)\b|\btree\b|\bstructure\b/i;
 const NON_TREE_WORK = /\b(read|analy[sz]e|review|explain|fix|search|find|compare|summari[sz]e)\b/i;
 
 function repositoryFromTreeRequest(message: string): { owner?: string; repo: string } | null {
@@ -18,7 +22,11 @@ function repositoryFromTreeRequest(message: string): { owner?: string; repo: str
   const fullName = message.match(/\b([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\b/);
   if (fullName) return { owner: fullName[1], repo: fullName[2] };
 
-  const namedRepository = message.match(/\b(?:of|for|in)\s+(?:the\s+)?["']?([A-Za-z0-9_.-]+)["']?\s+(?:repo|repository)\b/i);
+  // "repo"/"repository" after the name is a bonus signal, not a requirement —
+  // plenty of natural phrasings ("structure of codepilot.ai") never say it.
+  const namedRepository = message.match(
+    /\b(?:of|for|in)\s+(?:the\s+)?["']?([A-Za-z0-9_.-]+)["']?(?:\s+(?:repo|repository))?\b/i
+  );
   return namedRepository ? { repo: namedRepository[1] } : null;
 }
 
@@ -77,7 +85,8 @@ export async function sendMessage(
 
     const isFirstMessage = chat.title === "New chat";
     if (isFirstMessage) {
-      await prisma.chat.update({ where: { id: chatId }, data: { title: message.slice(0, 40) } });
+      const trimmedTitle = message.trim().slice(0, 40) || "New chat";
+      await prisma.chat.update({ where: { id: chatId }, data: { title: trimmedTitle } });
     }
   }
 
@@ -87,7 +96,15 @@ export async function sendMessage(
     text: m.text,
   }));
 
-  const priorContext = chat.lastContext ? JSON.parse(chat.lastContext) : null;
+  let priorContext = null;
+  if (chat.lastContext) {
+    try {
+      priorContext = JSON.parse(chat.lastContext);
+    } catch (e) {
+      console.error("Failed to parse chat.lastContext:", e);
+    }
+  }
+
   const result = (await getDirectTreeReply(message, accessToken)) ??
     (await askGemini(history, accessToken, { thinkMode, priorContext }));
 
