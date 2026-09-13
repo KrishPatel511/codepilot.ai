@@ -85,8 +85,10 @@ export async function sendMessage(
 
     const isFirstMessage = chat.title === "New chat";
     if (isFirstMessage) {
-      const trimmedTitle = message.trim().slice(0, 40) || "New chat";
-      await prisma.chat.update({ where: { id: chatId }, data: { title: trimmedTitle } });
+      const trimmedTitle = message.trim().slice(0, 40);
+      if (trimmedTitle) {
+        await prisma.chat.update({ where: { id: chatId }, data: { title: trimmedTitle } });
+      }
     }
   }
 
