@@ -75,6 +75,11 @@ body {
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
+  /* A flex/grid item's default min-height is "auto", which lets it grow to fit
+     all its content instead of respecting the grid row's 100vh — that's what
+     was making the whole page scroll (header/footer dragged along with it)
+     instead of just the repo/chat list scrolling in place. */
+  min-height: 0;
   padding: 12px 8px;
   border-right: 1px solid var(--border);
   transition: transform 0.25s ease;
@@ -315,6 +320,7 @@ body {
 
 .sidebar-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   margin: 0 -8px;
   padding: 0 8px;
